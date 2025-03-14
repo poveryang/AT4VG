@@ -11,8 +11,8 @@ container_id=$(docker run -it --platform linux/amd64 -d -v "$project_dir":/works
 # Build the project in the docker container
 docker exec "$container_id" bash -c \
 "source /opt/myir-imx-xwayland/4.14-sumo/environment-setup-aarch64-poky-linux &&
-/usr/bin/cmake -DDEVICE='vs800' -S /workspace -B /workspace/build/vs800 &&
-/usr/bin/cmake --build /workspace/build/vs800 --clean-first --target install -- -j 16"
+/usr/bin/cmake -DDEVICE='vg800' -S /workspace -B /workspace/build/vg800 &&
+/usr/bin/cmake --build /workspace/build/vg800 --clean-first --target install -- -j 16"
 
 # Stop and remove the docker container
 docker stop "$container_id"
