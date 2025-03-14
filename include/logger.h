@@ -19,7 +19,7 @@ public:
 
 private:
     Logger() {
-        log_file_.open("log.txt", std::ios::out | std::ios::app);
+        log_file_.open("/tmp/at4vg_log.txt", std::ios::out | std::ios::app);
     }
 
     ~Logger() {
