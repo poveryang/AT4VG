@@ -91,27 +91,22 @@ int main(int argc, char *argv[]) {
     }
     std::cout << "Client connected." << std::endl;
 
-    CamCapture cam;
-    CamParams cam_params;
-    cam_params.exp_time = 1000;
+    CamCapture cam_capture;
+    CameraParams cam_params;
+    cam_params.exp_time = 200;
     cam_params.exp_gain = 100;
     cam_params.lights = {1, 1, 1, 1};
-    cam.SetCamParams(cam_params);
+    cam_params.focus_pos = 30;
+    cam_capture.SetCamParams(cam_params);
     std::cout << "Camera initialized." << std::endl;
 
+    at::CamConf cam_conf = {1000, 800, {0,0,0,0},
+        2000, 1, 0,
+        20, 500, 1, 255, 1.0,
+        0, 1, 1024,
+        0, 1000, 100, {1, 1, 1, 1}, 30};
+    at::ATInterface at_obj(cam_conf);
 
-    // 1. Create an AutoExposure object
-    int min_exp_time = 20;
-    int max_exp_time = sm_get_max_expt();
-    int min_gain = 1;
-    int max_gain = sm_get_max_gain();
-    AutoExposure auto_exposure(min_exp_time, max_exp_time, min_gain, max_gain);
-    std::cout << "Auto exposure initialized." << std::endl;
-
-
-    // 示例逻辑：根据客户端的命令做出相应
-    // 协议假定：
-    // "GET_FRAME" 请求返回一帧图像
     while (true) {
         std::string cmd;
         if (!ReceiveCommand(client_socket, cmd)) {
@@ -121,81 +116,26 @@ int main(int argc, char *argv[]) {
         std::cout << "Received command: " << cmd << std::endl;
 
         if (cmd == "GET_FRAME") {
-            // // 采图前打开灯光
-            // CamParams params;
-            // params.lights = {1,1,1,1}; // 假设有4路灯光，如果是单路就 {1}
-            // cam.SetCamParams(params);
-
-            // 采图并发送
-            cv::Mat image = cam.CapImg();
-            if (!SendImage(client_socket, image)) {
+            // Send image to client
+            if (cv::Mat image = cam_capture.CapImg(); !SendImage(client_socket, image)) {
                 std::cerr << "Failed to send image to client." << std::endl;
                 break;
             }
-
-            // // 采图完成后关灯
-            // params.lights = {0,0,0,0}; // 假设有4路灯光，如果是单路就 {0}
-            // cam.SetCamParams(params);
-        } else if (cmd.rfind("ADJUST_EXPOSURE:", 0) == 0) {
-            // 命令格式: ADJUST_EXPOSURE:<limited_exp_time>:<target_brightness>
-            std::string params_str = cmd.substr(strlen("ADJUST_EXPOSURE:"));
-            // 分割这两个参数
-            if (size_t colon_pos = params_str.find(':'); colon_pos != std::string::npos) {
-                const int limited_exp_time = std::stoi(params_str.substr(0, colon_pos));
-                const int target_brightness = std::stoi(params_str.substr(colon_pos + 1));
-                std::cout << "Limited exposure time: " << limited_exp_time << ", target brightness: " << target_brightness << std::endl;
-
-
-                // 2. Initialize the auto exposure adjustment
-                int cur_gain = sm_get_cur_gain();
-                auto_exposure.Init(cur_gain, target_brightness, limited_exp_time);
-
-                // 3. Set the initial exposure parameters
-                int exp_time, exp_gain;
-                auto_exposure.GetExposureParams(exp_time, exp_gain);
-                cam_params.exp_time = exp_time;
-                cam_params.exp_gain = exp_gain;
-                cam_params.lights = {1, 1, 1, 1};
-                cam.SetCamParams(cam_params);
-
-                // 4. Adjust exposure to target brightness
-                cv::Mat image;
-                bool adjust_done = false;
-                while (!adjust_done) {
-                    // Note: Drop the first two images
-                    for (int i = 0; i <= 2; ++i) {
-                        image = cam.CapImg();
-                        double brightness = AutoExposure::CalcImageBrightness(image);
-                        std::cout << "Img_" << i + 1 << " brt: " << brightness  << std::endl;
-                    }
-
-                    // 4.1. Adjust exposure parameters
-                    adjust_done = auto_exposure.AdjustExposure(image);
-
-                    // 4.2. Get the exposure parameters and set them to the camera
-                    auto_exposure.GetExposureParams(exp_time, exp_gain);
-
-                    cam_params.exp_time = exp_time;
-                    cam_params.exp_gain = exp_gain;
-                    cam_params.lights = {1, 1, 1, 1};
-                    cam.SetCamParams(cam_params);
-                }
-
-                // 5. Get the final exposure parameters until the adjustment is done
-                int final_exp_time, final_exp_gain;
-                auto_exposure.GetExposureParams(final_exp_time, final_exp_gain);
-                std::cout << "Final exposure time: " << final_exp_time << ", final gain: " << final_exp_gain << std::endl;
-
-                cam_params.exp_time = final_exp_time;
-                cam_params.exp_gain = final_exp_gain;
-                cam_params.lights = {1, 1, 1, 1};
-                cam.SetCamParams(cam_params);
-
-                cv::Mat final_image = cam.CapImg();
-                cv::imwrite("final_image.png", final_image);
+        } else if (cmd.rfind("ADJUST_BRIGHTNESS:", 0) == 0) {
+            // 命令格式: ADJUST_BRIGHTNESS:<target_brightness>
+            std::string params_str = cmd.substr(strlen("ADJUST_BRIGHTNESS:"));
+            const int target_brightness = std::stoi(params_str);
+            at_obj.Init(target_brightness);
+            bool adjust_done = false;
+            while (!adjust_done) {
+                cv::Mat image = cam_capture.CapImg();
+                adjust_done = at_obj.RunWithTargetBrt(image);
+                at::CamParams next_params = at_obj.GetNextParams();
+                cam_params.exp_time = next_params.exp_time;
+                cam_params.exp_gain = next_params.exp_gain;
+                cam_capture.SetCamParams(cam_params);
             }
         } else {
-            // 未知命令忽略或打印
             std::cerr << "Unknown command: " << cmd << std::endl;
         }
     }
